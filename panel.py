@@ -1,6 +1,7 @@
 import bpy
 from . import newuilist
 from bpy.types import (UIList)
+from bpy.props import StringProperty, IntProperty, CollectionProperty, BoolProperty, EnumProperty
 
 def hasKey(obj, slider) -> bool:
         data = obj.data
@@ -56,17 +57,17 @@ class HISANIM_UL_SLIDERS(bpy.types.UIList):
             index):
         props = context.scene.hisanimvars
         isKeyed = hasKey(bpy.context.object, item)
+
         if context.scene.poselibVars.stage != 'SELECT':
-            layout.row().label(text='Operation in progress.')
+            layout.label(text='Operation in progress.')
             return None
+
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            layout.row() # used as a little space to set the active item
             if item.split:
                 row = layout.row(align=True)
-                Name = item.name.split('_')[-1]
                 if not item.realvalue:
                     split = row.split(factor=0.7, align=True)
-                    split.prop(item, 'value', slider=True, text=Name)
+                    split.prop(item, 'value', slider=True, text=item.name.split('_')[-1])
                     split.prop(props, 'LR', slider=True, text='L-R')
                 else:
                     row.prop(props.activeface.data, f'["{item.R}"]', text='R')
@@ -122,26 +123,92 @@ class HISANIM_UL_LOCKSLIDER(bpy.types.UIList):
             layout.alignment = 'CENTER'
             layout.label(text='')
 
-class HISANIM_UL_RESULTS(bpy.types.UIList):
+class HISANIM_UL_ITEMS(bpy.types.UIList):
+    """
+    UI list containing items with builtin sorting capabilities
+    """
+    layout_type = "DEFAULT" # could be "COMPACT" or "GRID"
+
+    merc_filter: bpy.props.EnumProperty(
+        items=(
+            ("all", "All", 'All classes'),
+            ("scout", "Scout", ''),
+            ("sniper", "Sniper", ''),
+            ("soldier", "Soldier", ''),
+            ("pyro", "Pyro", ''),
+            ("heavy", "Heavy", ''),
+            ("medic", "Medic", ''),
+            ("demo", "Demoman", ''),
+            ("spy", "Spy", '')
+        ),
+        name="Class Filter",
+        description="Filter item based on classes that can equip it",
+        default="all"
+    )
+    # TODO implement this
+    # hide_medals: BoolProperty(name="Hide medals", description="Hide medal cosmetics", default = True)
+
     def draw_item(self, context,
             layout, data,
             item, icon,
             active_data, active_propname,
-            index):
+            index, flt_flag):
         props = context.scene.hisanimvars
+
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            name = item.name
-            split = layout.split(factor=0.2)
-            split.label(text=item.name.split('_-_')[1].title())
-            op = split.operator('hisanim.loadcosmetic', text=item.name.split('_-_')[0])
-            op.LOAD = item.name
+            # TODO: Add merc icons
+            layout.label(text=f"({item.name.split('_-_')[1].title()}) {item.name.split('_-_')[0]}", translate=False)
 
         elif self.layout_type in {'GRID'}:
             layout.alignment = 'CENTER'
-            layout.label(text='')
+            layout.label(text=f"{item.name.split('_-_')[0]}", translate=False)
+
+    def draw_filter(self, context, layout):
+        """Use custom filter"""
+        layout.separator()
+        col = layout.column(align=True)
+
+        row = col.row()
+        row1 = row.row(align=True)
+        row1.prop(self, 'filter_name', text='', icon='VIEWZOOM')
+        row1.prop(self, 'use_filter_invert', text='', icon='ARROW_LEFTRIGHT')
+        row2 = row.row(align=True)
+        # row = col.row(align=True)
+        row2.prop(self, 'use_filter_sort_alpha', text='', icon='VIEWZOOM')
+        row2.prop(self, 'use_filter_sort_reverse', text='', icon='ARROW_LEFTRIGHT')
+        col.separator()
+
+        split = col.split()
+        # TODO: Add merc icons
+        split.prop(self, 'merc_filter', text='')
+        # TODO categorize all medals if possible
+        # split.prop(self, 'hide_medals', text='Hide Medals')
+    
+    def filter_items(self, context, data, propname):
+        helpers = bpy.types.UI_UL_list
+        items = getattr(data, propname)
+
+        flt_ordered = []
+        flt_flags = []
+
+        # Filtering by name
+        if self.filter_name:
+            flt_flags = helpers.filter_items_by_name(self.filter_name, self.bitflag_filter_item, items, 
+                "name", reverse=self.use_filter_sort_reverse)
+
+        if not flt_flags:
+            flt_flags = [self.bitflag_filter_item] * len(items)
+
+        if not (self.merc_filter == "all"):
+            for idx, vg in enumerate(items):
+                metaname = vg.name.split('_-_')[1]
+                if metaname == self.merc_filter or metaname == "weapons":
+                    continue
+                flt_flags[idx] = ~self.bitflag_filter_item
+
+        return flt_flags, flt_ordered
 
 class HISANIM_UL_USESLIDERS(bpy.types.UIList):
-
     def filter_items(self, context, data, propname):
         poselib = context.scene.poselibVars
         props = context.scene.hisanimvars
@@ -150,7 +217,7 @@ class HISANIM_UL_USESLIDERS(bpy.types.UIList):
         for i, item in enumerate(items):
             if self.filter_name.lower() not in item.name.lower():
                 filtered[i] &= ~self.bitflag_filter_item
-                
+                MATERIAL_UL_matslots_example
             if props.up or props.mid or props.low:
                 
                 if item.Type == 'NONE':
@@ -212,6 +279,19 @@ class POSELIB_UL_visemes(UIList):
         row.prop(item, 'use', text='')
         row.label(text="_".join(item.name.split("_")[1:]))
 
+class LOADOUT_UL_loadouts(UIList):
+    def draw_item(self, context,
+            layout, data,
+            item, icon,
+            active_data, active_propname,
+            index):
+        props = context.scene.hisanimvars
+        row = layout.row()
+        row.label(text=': '.join(item.name.split('_-_')))
+        if props.stage == 'NONE':
+            op = row.operator('loadout.select', text='', icon='FORWARD')
+            op.loadout = item.name
+
 class TRIFECTA_PT_PANEL(bpy.types.Panel):
     """A Custom Panel in the Viewport Toolbar"""
     bl_label = 'TF2-Trifecta'
@@ -226,191 +306,210 @@ class TRIFECTA_PT_PANEL(bpy.types.Panel):
         poselib = bpy.context.scene.poselibVars
         layout = self.layout
         
+        # the main "box" containing everything.
+        maindiv = layout.box()
+
         if prefs.quickswitch:
-            row = layout.row()
-            row.label(text=f'Tool: {props.tools.title()}')
-            row.prop(props, 'wr', icon='MOD_CLOTH', text='', toggle=True)
-            row.prop(props, 'md', icon='FORCE_DRAG', text='', toggle=True)
-            row.prop(props, 'bm', icon='GROUP_BONE', text='', toggle=True)
-            row.prop(props, 'fp', icon='RESTRICT_SELECT_OFF', text='', toggle=True)
+            col = maindiv.box().column(align=True)
+            col.label(text=f'Tool: {props.tools.title()}')
+            split = col.split(align = True)
+            row = col.row()
+            split.prop(props, 'wr', icon='MOD_CLOTH', toggle=True)
+            split.prop(props, 'md', icon='FORCE_DRAG', toggle=True)
+            split.prop(props, 'bm', icon='GROUP_BONE', toggle=True)
+            split.prop(props, 'fp', icon='RESTRICT_SELECT_OFF', toggle=True)
         else:
-            layout.row().prop(props, 'tools')
+            maindiv.row().prop(props, 'tools')
+
         if props.tools == 'WARDROBE':
-            row = layout.row()
-            row.label(text='Spawn TF2 Cosmetics', icon='MOD_CLOTH')
-            row = layout.row()
-            row.prop(props, 'query', text="Search", icon="VIEWZOOM")
-            row = layout.row()
-            row.prop(context.scene.hisanimvars, 'hisanimweapons')
-            if props.hisanimweapons:
-                row = layout.row()
-                row.prop(props, 'autobind')
-            if prefs.missing == True:
-                row = layout.row()
-                row.label(text='Assets missing. Check preferences for info.')
-            row=layout.row()
-            row.operator('hisanim.search', icon='VIEWZOOM')
-            row=layout.row()
-            row.operator('hisanim.clearsearch', icon='X')
-            if props.ddmatsettings or not prefs.compactable:
-                if prefs.compactable: row = layout.row()
-                if prefs.compactable: row.prop(props, 'ddmatsettings', icon='DISCLOSURE_TRI_DOWN', emboss=False)
-                if prefs.compactable: row.label(text='Material settings')
-                if not prefs.compactable: layout.label(text='Material settings')
-                row=layout.row()
-                row.operator('hisanim.lightwarps')
-                row=layout.row()
-                row.operator('hisanim.removelightwarps')
-                row = layout.row()
-                row.prop(context.scene.hisanimvars, 'hisanimrimpower', slider=True)
-                row = layout.row()
-                row.prop(context.scene.hisanimvars, 'wrdbbluteam')
+            wardrobe_box = maindiv.box()
+
+            col = wardrobe_box.column()
+            col.label(text='Spawn TF2 Cosmetics', icon='MOD_CLOTH')
+            
+            hits = getattr(props, 'items')
+            col = col.column()
+            colcol = col.column()   
+            colcol.template_list('HISANIM_UL_ITEMS', '', props, 'items', props, 'resultindex')
+            
+            split = colcol.split(align = True, factor=0.9)
+            if not props.resultindex == -1 and len(hits) > 0:
+                objname = hits[props.resultindex]
+                op = split.operator('hisanim.loadcosmetic', text=f"Equip {objname.name.split('_-_')[0].title()}")
+                op.LOAD = objname.name
             else:
-                row = layout.row()
-                row.prop(props, 'ddmatsettings', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
-                row.label(text='Material settings', icon='MATERIAL')
+                # fake items
+                fakedisable = split.row(align = True)
+                fakedisable.enabled = False
+                fakedisable.operator('hisanim.loadcosmetic', text="Equip None")
+            split.operator('hisanim.refresh_item_list', text="", icon="FILE_REFRESH")
 
-            if len(context.selected_objects) > 0:
-                if context.object.get('skin_groups') != None:
-                    row = layout.row()
-                    if props.ddpaints or not prefs.compactable:
-                        if prefs.compactable: row.prop(props, 'ddpaints', icon='DISCLOSURE_TRI_DOWN', emboss=False)
-                        if prefs.compactable: row.label(text='Paints')
-                        ob = context.object
-                        row = layout.row()
-                        row.label(text='Attempt to fix material')
-                        row = layout.row()
-                        row.template_list("MATERIAL_UL_matslots", "", ob, "material_slots", ob, "active_material_index")
-                        row = layout.row(align=True)
-                        row.operator('hisanim.materialfix')
-                        row.operator('hisanim.revertfix')
-                        row = layout.row()
-                        row.template_icon_view(context.window_manager, 'hisanim_paints', show_labels=True, scale=4, scale_popup=4)
-                        row=layout.row(align=True)
-                        oper = row.operator('hisanim.paint', text = 'Add Paint')
-                        oper.PAINT = newuilist.paints[context.window_manager.hisanim_paints]
-                        row.operator('hisanim.paintclear')
-                    else:
-                        row.prop(props, 'ddpaints', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
-                        row.label(text='Paints', icon='BRUSH_DATA')
+            # col.prop(context.scene.hisanimvars, 'hisanimweapons')
+            if props.hisanimweapons:
+                col.prop(props, 'autobind')
 
-            if props.searched:
-                if props.ddsearch or not prefs.compactable:
-                    if prefs.compactable: row = layout.row()
-                    if prefs.compactable: row.prop(props, 'ddsearch', icon='DISCLOSURE_TRI_DOWN', emboss=False)
-                    if prefs.compactable: row.label(text='Search Results')
-                    if not prefs.compactable: layout.label(text='Search Results')
-                    hits = props.results
-                    row = layout.row()
-                    if len(hits) > 0:
-                        if len(hits) == 1:
-                            row.label(text=f'{len(hits)} Result')
-                        else:
-                            row.label(text=f'{len(hits)} Results')
-                        layout.row().template_list('HISANIM_UL_RESULTS', 'Results', props, 'results', props, 'resultindex')
-                    else: 
-                        layout = self.layout
-                        layout.label(text='Nothing found!')
+            if prefs.missing == True:
+                col.label(text='Some assets missing. Check preferences for info.', icon="INFO")
+
+            material_box = maindiv.box()
+            material_row = material_box.row()
+            if props.ddmatsettings:
+                material_row.prop(props, 'ddmatsettings', icon='DISCLOSURE_TRI_DOWN', emboss=False)
+                material_row.label(text='Material settings')
+                
+                mbox_col=material_box.column(align = True)
+                mbox_col.operator('hisanim.lightwarps')
+                mbox_col.operator('hisanim.removelightwarps')
+                mbox_col.prop(context.scene.hisanimvars, 'hisanimrimpower', slider=True)
+                mbox_col.prop(context.scene.hisanimvars, 'wrdbbluteam')
+            else:
+                material_row.prop(props, 'ddmatsettings', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
+                material_row.label(text='Material settings')
+
+            if len(context.selected_objects) > 0 and context.object and context.object.get('skin_groups') != None:
+                paint_box = maindiv.box()
+                paint_row = paint_box.row()
+                if props.ddpaints:
+                    paint_row.prop(props, 'ddpaints',  icon='DISCLOSURE_TRI_DOWN', emboss=False)
+                    paint_row.label(text='Paints')
+
+                    ob = context.object
+                    pbox_col = paint_box.column(align = True)
+                    pbox_col.template_icon_view(context.window_manager, 'hisanim_paints', show_labels=True, scale=4, scale_popup=4)
+                    pbox_spli = pbox_col.split(align = True)
+                    pbox_spli.operator('hisanim.paint', text = 'Add Paint').PAINT = newuilist.paints[context.window_manager.hisanim_paints]
+                    pbox_spli.operator('hisanim.paintclear')
+
+                    # TODO should material settings own fixing instead of paints?
+                    pbox_fix_col = paint_box.column(align = True)
+                    pbox_fix_col.enabled = prefs.compactable
+                    # pbox_fix_col.label(text='Attempt to fix material')
+                    pbox_fix_col.template_list("MATERIAL_UL_matslots", "", ob, "material_slots", ob, "active_material_index")
+                    pbox_fix_spli = pbox_fix_col.split(align = True)
+                    pbox_fix_spli.operator('hisanim.materialfix')
+                    pbox_fix_spli.operator('hisanim.revertfix')
                 else:
-                    row = layout.row()
-                    row.prop(props, 'ddsearch', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
-                    row.label(text='Search Results', icon='VIEWZOOM')
+                    paint_row.prop(props, 'ddpaints', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
+                    paint_row.label(text='Paints', icon='BRUSH_DATA')
+
+            loadout_box = maindiv.box()
+            loadout_row = loadout_box.row()
+            if props.ddloadouts:
+                loadout_row.prop(props, 'ddloadouts', icon='DISCLOSURE_TRI_DOWN', emboss=False)
+                loadout_row.label(text='Loadouts')
+                
+                # should look like the material selection tab
+                row = loadout_box.row()
+                row.template_list('LOADOUT_UL_loadouts', 'Loadouts', props, 'loadout_data', props, 'loadout_index')
+                opcol = row.column()
+                opcol1 = opcol.column(align = True)
+                opcol1.operator('wdrb.select', text='', icon='ADD')
+                opcol1.operator('loadout.remove', text='', icon='REMOVE')
+                opcol.operator('loadout.refresh', icon='FILE_REFRESH', text='', emboss=False)
+                opcol2 = opcol.column(align = True)
+                opcol2.operator('loadout.move', text='', icon='TRIA_UP')
+                opcol2.operator('loadout.move', text='', icon='TRIA_DOWN')
+
+                if props.stage == 'SELECT':
+                    loadout_new_col = loadout_box.column()
+                    if (len(bpy.types.Scene.loadout_temp) == 0): loadout_new_col.label(text='No Cosmetics Selected!', icon="ERROR")
+                    loadout_new_col.prop(props, 'loadout_name', text='Name')
+                    split = loadout_new_col.split(align = True)
+                    split.operator('wdrb.cancel')
+                    split.operator('wdrb.confirm')
+
+                if props.stage == 'DISPLAY':
+                    split = loadout_box.split(align = True)
+                    split.operator('wdrb.cancel')
+                    split.operator('loadout.load')
+                if props.stage == 'NONE': 
+                    loadout_box.operator('loadout.rename')
+            else:
+                loadout_row.prop(props, 'ddloadouts', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
+                loadout_row.label(text='Loadouts', icon='ASSET_MANAGER')
         
         if props.tools == 'MERC DEPLOYER':
-            row = layout.row()
-            row.label(text='Deploy Mercenaries', icon='FORCE_DRAG')
-            cln = ["IK", "FK"]
-            mercs = ['scout', 'soldier', 'pyro', 'demo',
-                    'heavy', 'engineer', 'medic', 'sniper', 'spy']
-            if prefs.hisanim_paths.get('TF2-V3') != None:
-                if prefs.hisanim_paths.get('TF2-V3').this_is != 'FOLDER':
-                    row = layout.row()
-                    row.label(text='TF2-V3 contains an invalid path!')
-                else:
-                    row = layout.row(align=True)
-                    for i in mercs:
-                        row.label(text=i)
-                        col = layout.column()
-                        for ii in cln:
-                            MERC = row.operator('hisanim.loadmerc', text=ii)
-                            MERC.merc = i
-                            MERC.type = ii
-                        row = layout.row(align=True)
-                    row.prop(context.scene.hisanimvars, "bluteam")
-                    layout.row().prop(context.scene.hisanimvars, "cosmeticcompatibility")
-                    layout.row().prop(props, 'hisanimrimpower', slider=True)
+            merc_box = maindiv.box()
 
-                    
-            else:
-                row = layout.row()
-                row.label(text='TF2-V3 has not been added!')
-                row = layout.row()
-                row.label(text='If it is added, check name.')
+            merc_box.label(text='Deploy Mercenaries', icon='FORCE_DRAG')
+            cln = ["IK", "FK"]
+            mercs = ['scout', 'soldier', 'pyro', 'demo', 'heavy', 'engineer', 'medic', 'sniper', 'spy']
+
+            if prefs.hisanim_paths.get('TF2-V3') == None:
+                merc_box.label(text='TF2-V3 has not been added!', icon="INFO")
+            if prefs.hisanim_paths.get('TF2-V3') and prefs.hisanim_paths.get('TF2-V3').this_is != 'FOLDER':
+                merc_box.label(text='TF2-V3 must be a folder!', icon="INFO")
+
+            column = merc_box.column()
+            column.enabled = (prefs.hisanim_paths.get('TF2-V3') != None and prefs.hisanim_paths.get('TF2-V3').this_is == 'FOLDER')
+            merc_column = column.column(align = True)
+            for mercname in mercs:
+                mercrow = merc_column.row(align = True)
+                mercrow.label(text = mercname.title())
+                for ii in cln:
+                    MERC = mercrow.operator('hisanim.loadmerc', text=ii)
+                    MERC.merc = mercname
+                    MERC.rigtype = ii
+    
+            column.prop(context.scene.hisanimvars, "bluteam")
+            column.prop(context.scene.hisanimvars, "cosmeticcompatibility")
+            column.prop(props, 'hisanimrimpower', slider=True)
             
         if props.tools == 'BONEMERGE':
-            row = layout.row()
-            row.label(text='Attach TF2 cosmetics.', icon='DECORATE_LINKED')
-            ob = context.object
-            row = layout.row()
-            self.layout.prop_search(context.scene.hisanimvars, "hisanimtarget", bpy.data, "objects", text="Link to", icon='ARMATURE_DATA')
+            bonemerge_box = maindiv.box()
+            bonemerge_box.label(text='Attach TF2 cosmetics.', icon='DECORATE_LINKED')
+            bonemerge_box.prop_search(context.scene.hisanimvars, "hisanimtarget", bpy.data, "objects", text="Link to", icon='ARMATURE_DATA')
             
-            row = layout.row()
+            row = bonemerge_box.row(align = True)
             row.operator('hisanim.attachto', icon="LINKED")
-            row=layout.row()
             row.operator('hisanim.detachfrom', icon="UNLINKED")
-            row = layout.row()
-            row.prop(context.scene.hisanimvars, 'hisanimscale')
-            row = layout.row()
-            row.label(text='Bind facial cosmetics')
-            row = layout.row()
-            row.operator('hisanim.bindface')
-            row = layout.row()
-            row.label(text='Attempt to fix cosmetic')
-            row = layout.row()
-            row.operator('hisanim.attemptfix')
+            
+            bonemerge_box.prop(context.scene.hisanimvars, 'hisanimscale')
+            bonemerge_box.operator('hisanim.bindface')
+            bonemerge_box.operator('hisanim.attemptfix')
 
         if props.tools == 'FACE POSER':
-            if len(context.selected_objects) == 0:
-                layout.label(text='Select a face!')
-                return None
-            if context.object == None:
-                layout.label(text='Select a face!')
-                return None
-            if context.object.type == 'EMPTY':
-                layout.label(text='Select a face!')
-                return None
-            if context.object.data.get('aaa_fs') == None:
-                layout.label(text='Select a face!')
+            face_box = maindiv.box()
+
+            if (len(context.selected_objects) == 0 
+                or context.object == None 
+                or context.object.type == 'EMPTY' 
+                or context.object.data.get('aaa_fs') == None):
+                face_box.label(text='Select a face!')
                 return None
             
             if props.ddfacepanel or not prefs.compactable:
                 if prefs.compactable:
-                    row = layout.row()
+                    row = face_box.row()
                     row.prop(props, 'ddfacepanel', icon='DISCLOSURE_TRI_DOWN', emboss=False)
                     row.label(text='Face Poser')
-                row = layout.row(align=True)
-                row.operator('hisanim.optimize')
-                row.operator('hisanim.restore')
-                row = layout.row(align=True)
-                col = row.column()
-                col.template_list('HISANIM_UL_SLIDERS', 'Sliders', props, 'sliders', props, 'sliderindex')
+                contentcol = face_box.column()
+                
+                row = contentcol.row(align=True)
+                row.template_list('HISANIM_UL_SLIDERS', 'Sliders', props, 'sliders', props, 'sliderindex')
                 col = row.column()
                 col.operator('hisanim.fixfaceposer', icon='PANEL_CLOSE' if props.dragging else 'CHECKMARK', text='')
                 col.prop(bpy.context.scene.tool_settings, 'use_keyframe_insert_auto', text='')
                 col.label(text='', icon='BLANK1')
                 col.operator('hisanim.keyeverything', icon='DECORATE_KEYFRAME', text='')
-                row = layout.row(align=True)
+
+                row = contentcol.row(align=True)
                 op = row.operator('hisanim.adjust', text='', icon='TRIA_LEFT')
                 op.amount = -0.1
                 row.prop(props, 'LR', slider=True)
                 op = row.operator('hisanim.adjust', text='', icon='TRIA_RIGHT')
                 op.amount = 0.1
-                row = layout.row(align=True)
+                row = contentcol.row(align=True)
                 row.prop(props, 'up', text='Upper', toggle=True)
                 row.prop(props, 'mid', text='Mid', toggle=True)
                 row.prop(props, 'low', text='Lower', toggle=True)
+
+                contentcol
+                row = contentcol.row(align=True)
+                row.operator('hisanim.optimize')
+                row.operator('hisanim.restore')
             else:
-                row = layout.row()
+                row = face_box.row()
                 row.prop(props, 'ddfacepanel', icon='DISCLOSURE_TRI_RIGHT', emboss=False)
                 row.label(text='Face Poser', icon='RESTRICT_SELECT_OFF')
 
@@ -490,16 +589,19 @@ class TRIFECTA_PT_PANEL(bpy.types.Panel):
 classes = [
     TRIFECTA_PT_PANEL,
     HISANIM_UL_SLIDERS,
-    HISANIM_UL_RESULTS,
+    HISANIM_UL_ITEMS,
     HISANIM_UL_LOCKSLIDER,
     POSELIB_UL_panel,
     HISANIM_UL_USESLIDERS,
-    POSELIB_UL_visemes
+    POSELIB_UL_visemes,
+    LOADOUT_UL_loadouts
 ]
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    
+
 def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
